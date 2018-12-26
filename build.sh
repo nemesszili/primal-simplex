@@ -1,1 +1,1 @@
-g++ main.cpp -o p -O2 -larmadillo
+g++ main.cpp -o p -O2 -larmadillo -lortools

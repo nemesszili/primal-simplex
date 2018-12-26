@@ -1,12 +1,101 @@
 #include <iostream>
-#include <exception>
+#include <string>
 #include <algorithm>
 #include <vector>
 
+#include "ortools/lp_data/mps_reader.h"
+#include "ortools/base/stringpiece_utils.h"
+#include "ortools/glop/lp_solver.h"
+#include "ortools/glop/parameters.pb.h"
+#include "ortools/lp_data/lp_types.h"
+
 #include "armadillo"
 
-using namespace arma;
 using namespace std;
+using namespace arma;
+
+using operations_research::glop::LinearProgram;
+using operations_research::glop::MPSReader;
+using operations_research::glop::ProblemStatus;
+using operations_research::glop::ToDouble;
+using operations_research::glop::LPSolver;
+using operations_research::glop::GetProblemStatusString;
+
+using operations_research::glop::DenseRow;
+using operations_research::glop::SparseMatrix;
+using operations_research::glop::RowIndex;
+using operations_research::glop::ColIndex;
+using operations_research::glop::Fractional;
+using operations_research::glop::kInfinity;
+
+int MPSToMatrix(LinearProgram& linear_program, string file_name,
+        mat& A, colvec& b, rowvec& c) {
+    // Load MPS file
+    MPSReader mps_reader;
+
+    if (strings::EndsWith(file_name, ".mps")) {
+        if (!mps_reader.LoadFileAndTryFreeFormOnFail(file_name,
+                                                   &linear_program)) {
+        cerr << "Failed to read problem from file!";
+        return EXIT_FAILURE;
+      }
+    } else {
+        cerr << "Input file extension must be .mps!";
+        return EXIT_FAILURE;
+    }
+
+    // Extract information
+    
+    // c <- objective function coefficients
+    DenseRow coeffs = linear_program.objective_coefficients();
+    // rowvec c(coeffs.size().value());
+    c = resize(c, 1, coeffs.size().value());
+    int i = 0;
+    for (double coeff: coeffs) {
+        c[i] = coeff;
+        i++;
+    }
+
+    // A <- coefficients of constraints
+    const SparseMatrix& matrix = linear_program.GetSparseMatrix();
+    // mat A(matrix.num_rows().value(), matrix.num_cols().value());
+    A = resize(A, matrix.num_rows().value(), matrix.num_cols().value());
+    for (RowIndex row(0); row < matrix.num_rows(); ++row) {
+        for (ColIndex col(0); col < matrix.num_cols(); ++col) {
+            A(row.value(), col.value()) = ToDouble(matrix.LookUpValue(row, col));
+        }
+    }
+
+    // b <- bounds
+    const RowIndex num_rows = linear_program.num_constraints();
+    b = resize(b, num_rows.value(), 1);
+    for (RowIndex row(0); row < num_rows; ++row) {
+        const Fractional lower_bound = linear_program.constraint_lower_bounds()[row];
+        const Fractional upper_bound = linear_program.constraint_upper_bounds()[row];
+        
+        // Transformations
+        if (lower_bound == -kInfinity) {
+            A.insert_cols(A.n_cols, 1);
+            A(row.value(), A.n_cols - 1) = 1;
+
+            c.insert_cols(c.n_cols, 1);
+
+            b[row.value()] = ToDouble(upper_bound);
+        } else if (upper_bound == kInfinity) {
+            A.row(row.value()).transform( [&](double val) { return (-val); } );
+            A.insert_cols(A.n_cols, 1);
+            A(row.value(), A.n_cols - 1) = 1;
+
+            c.insert_cols(c.n_cols, 1);
+
+            b[row.value()] = -ToDouble(lower_bound);
+        } else {
+            b[row.value()] = ToDouble(upper_bound);
+        }
+    }
+
+    return 0;
+}
 
 void print_solution(mat A, mat d, vector<int> B_index, double z) {
 	cout << endl;
@@ -46,7 +135,7 @@ void find_pivot(mat A, vector<int> B_index, int q, int& row, double& t) {
 			if (test < min) {
 				min = test;
 				ind = i;
-			}
+            }
 		}
 	}
 
@@ -77,23 +166,26 @@ void change_base(mat& A, mat& d, int row, int col,
 	replace(nonB_index.begin(), nonB_index.end(), col, aux);
 }
 
-int main(int argc, char** argv)
-{
-	cout << "Armadillo version: " << arma_version::as_string() << endl;
-	mat A;
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        cout << "Usage: " << argv[0] << " <mps_file>" << endl;
+        return EXIT_FAILURE;
+    }
 
-	A << 2  << 1 << 1 << 1 << 0 << 0 << endr
-	  << 0  << 1 << 2 << 0 << 1 << 0 << endr
-	  << -1 << 0 << 3 << 0 << 0 << 1 << endr;
+    mat A;
+    colvec b;
+    rowvec c;
 
-	rowvec c;
-	c << -1 << -1 << -2 << 0 << 0 << 0 << endr;
+    LinearProgram linear_program;
+    const string& file_name = argv[1];
+    if (MPSToMatrix(linear_program, file_name, A, b, c)) {
+        return EXIT_FAILURE;
+    }
 
-	colvec b;
-	b << 1 << 3 << 2 << endr;
+    // cout << endl << endl << linear_program.Dump() << endl;
 
-	vector<int> B_index;
-	B_index.push_back(3);
+    vector<int> B_index;
+	B_index.push_back(1);
 	B_index.push_back(4);
 	B_index.push_back(5);
 
@@ -163,15 +255,15 @@ int main(int argc, char** argv)
 	multi.print("piT: ");
 
 	// Calculate initial dT
-	// mat d = c - multi * A;
-	mat d = c;
+	mat d = c - multi * A;
+	// mat d = c;
 	d.print("Initial d:");
 	d.insert_cols(A.n_cols, 1);
 
 	int row;
 	double t;
-	// A = join_rows(A, xB);
-	A = join_rows(A, b);
+	A = join_rows(A, xB);
+	// A = join_rows(A, b);
 	A.print("A:");	
 
 	while (true) {
@@ -204,8 +296,6 @@ int main(int argc, char** argv)
 
 			// Update target function value
 			z += t * d[q];
-			cout << "t = " << t << endl;
-			cout << "d = " << d[q] << endl;
 			cout << "Z = " << z << endl;
 
 			change_base(A, d, row, q, B_index, nonB_index);
@@ -217,9 +307,6 @@ int main(int argc, char** argv)
 			break;
 		}
 	}
-	
-	// TODO: read from MPS
-	// TODO: convert system to matrix form
 
-	return 0;
+    return EXIT_SUCCESS;
 }
