@@ -170,7 +170,7 @@ int main(int argc, char* argv[]) {
     if (argc != 2) {
         cout << "Usage: " << argv[0] << " <mps_file>" << endl;
         return EXIT_FAILURE;
-    }
+	}
 
     mat A;
     colvec b;
@@ -180,14 +180,20 @@ int main(int argc, char* argv[]) {
     const string& file_name = argv[1];
     if (MPSToMatrix(linear_program, file_name, A, b, c)) {
         return EXIT_FAILURE;
-    }
+	}
 
-    // cout << endl << endl << linear_program.Dump() << endl;
-
-    vector<int> B_index;
-	B_index.push_back(1);
-	B_index.push_back(4);
-	B_index.push_back(5);
+	A.print("A:");
+	
+	vector<int> B_index;
+	int ind;
+	for (int i = 0; i < A.n_rows; ++i) {
+		ind = -1;
+		while ((ind < 0) || (ind >= A.n_cols)) {
+			cout << "Provide base index nr. " << i+1 << ": ";
+			cin >> ind;
+		}
+		B_index.push_back(ind);
+	}
 
 	vector<int> full;
 	for (int i = 0; i < A.n_cols; i++) {
@@ -239,7 +245,6 @@ int main(int argc, char* argv[]) {
 	}
 	final_xB.print("xB:");
 	double z = sum(c % final_xB);
-	// double z = 0;
 	cout << "Initial Z = " << z << endl;
 
 	rowvec cB(B.n_rows);
@@ -256,14 +261,12 @@ int main(int argc, char* argv[]) {
 
 	// Calculate initial dT
 	mat d = c - multi * A;
-	// mat d = c;
 	d.print("Initial d:");
 	d.insert_cols(A.n_cols, 1);
 
 	int row;
 	double t;
 	A = join_rows(A, xB);
-	// A = join_rows(A, b);
 	A.print("A:");	
 
 	while (true) {
